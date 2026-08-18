@@ -1,0 +1,55 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- ARM Chip Base Frame (Centered in 66dp safe zone: X 26-82, Y 26-82) -->
+    <path
+        android:fillColor="#1E293B"
+        android:pathData="M31,27 L77,27 A4,4 0 0,1 81,31 L81,77 A4,4 0 0,1 77,81 L31,81 A4,4 0 0,1 27,77 L27,31 A4,4 0 0,1 31,27 Z" />
+    <path
+        android:strokeColor="#0284C7"
+        android:strokeWidth="1.8"
+        android:pathData="M31,27 L77,27 A4,4 0 0,1 81,31 L81,77 A4,4 0 0,1 77,81 L31,81 A4,4 0 0,1 27,77 L27,31 A4,4 0 0,1 31,27 Z" />
+        
+    <!-- Processor Pins -->
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M37,23 H41 V27 H37 Z M47,23 H51 V27 H47 Z M57,23 H61 V27 H57 Z M67,23 H71 V27 H67 Z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M37,81 H41 V85 H37 Z M47,81 H51 V85 H47 Z M57,81 H61 V85 H57 Z M67,81 H71 V85 H67 Z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M23,37 H27 V41 H23 Z M23,47 H27 V51 H23 Z M23,57 H27 V61 H23 Z M23,67 H27 V71 H23 Z" />
+    <path
+        android:fillColor="#38BDF8"
+        android:pathData="M81,37 H85 V41 H81 Z M81,47 H85 V51 H81 Z M81,57 H85 V61 H81 Z M81,67 H85 V71 H81 Z" />
+
+    <!-- Windows 11 Quad Logo (4 Tiles) -->
+    <!-- Top-Left Tile (Light Blue) -->
+    <path
+        android:fillColor="#00ADEF"
+        android:pathData="M36,36 L52,36 L52,52 L36,52 Z" />
+    <!-- Top-Right Tile (Azure Blue) -->
+    <path
+        android:fillColor="#0078D7"
+        android:pathData="M56,36 L72,36 L72,52 L56,52 Z" />
+    <!-- Bottom-Left Tile (Sky Blue) -->
+    <path
+        android:fillColor="#29B6F6"
+        android:pathData="M36,56 L52,56 L52,72 L36,72 Z" />
+    <!-- Bottom-Right Tile (Deep Windows Blue) -->
+    <path
+        android:fillColor="#0288D1"
+        android:pathData="M56,56 L72,56 L72,72 L56,72 Z" />
+
+    <!-- Hypervisor Bracket Accents -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:pathData="M34,42 L34,34 L42,34 M74,42 L74,34 L66,34 M34,66 L34,74 L42,74 M74,66 L74,74 L66,74" />
+</vector>
+

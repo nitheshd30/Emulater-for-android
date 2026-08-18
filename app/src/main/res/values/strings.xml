@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">WinDroid</string>
+    <string name="title_vm_manager">Virtual Machines</string>
+    <string name="title_create_vm">Create Virtual Machine</string>
+    <string name="title_vm_settings">VM Settings</string>
+    <string name="title_windows_guide">Windows 11 Setup Guide</string>
+    <string name="btn_create_vm">New VM</string>
+    <string name="btn_start_vm">Start Machine</string>
+    <string name="btn_pause_vm">Pause</string>
+    <string name="btn_stop_vm">Stop</string>
+</resources>

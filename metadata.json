@@ -1,0 +1,6 @@
+{
+  "name": "WinDroid",
+  "description": "Windows on ARM Virtual Machine Manager and Emulator for Android",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
