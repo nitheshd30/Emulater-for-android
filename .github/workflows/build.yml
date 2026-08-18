@@ -44,10 +44,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Prepare Debug Keystore and Environment
         run: |
@@ -68,12 +69,7 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+          gradle assembleDebug -Dkotlin.compiler.execution.strategy=daemon -Dksp.useKSP2=true --stacktrace
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
@@ -99,10 +95,11 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Prepare Signing Key & Environment
         env:
@@ -140,21 +137,12 @@ jobs:
 
       - name: Build Release APK
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew assembleRelease --stacktrace
-          else
-            gradle assembleRelease --stacktrace
-          fi
+          gradle assembleRelease -Dkotlin.compiler.execution.strategy=daemon -Dksp.useKSP2=true --stacktrace
 
       - name: Build Release AAB (Bundle)
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_bundle == 'true' || github.event.inputs.build_bundle == true }}
         run: |
-          if [ -f "./gradlew" ]; then
-            ./gradlew bundleRelease --stacktrace
-          else
-            gradle bundleRelease --stacktrace
-          fi
+          gradle bundleRelease -Dkotlin.compiler.execution.strategy=daemon -Dksp.useKSP2=true --stacktrace
 
       - name: Upload Release APK Artifact
         uses: actions/upload-artifact@v4
