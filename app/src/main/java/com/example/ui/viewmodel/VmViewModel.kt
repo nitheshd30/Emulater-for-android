@@ -51,6 +51,10 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
             initialValue = emptyList()
         )
 
+        runtimeManager.onInstallationCompleted = { updatedVm ->
+            saveVm(updatedVm)
+        }
+
         // Seed initial default Windows 11 ARM VM if list is empty
         viewModelScope.launch {
             repository.allVms.collect { list ->

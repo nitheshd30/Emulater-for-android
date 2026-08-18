@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -131,6 +135,21 @@ fun VmRunnerScreen(
 
     var isMenuOpen by remember { mutableStateOf(false) }
     var isIsoSelectorOpen by remember { mutableStateOf(false) }
+
+    // SAF Document Picker for live ISO swapping
+    val liveIsoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (_: Exception) {}
+
+            val inspection = com.example.engine.IsoInspector.inspectUri(context, uri)
+            runtimeManager.mountIso(inspection.fileName, uri.toString())
+        }
+    }
 
     LaunchedEffect(runtimeState.toastMessage) {
         runtimeState.toastMessage?.let { msg ->
@@ -423,6 +442,14 @@ fun VmRunnerScreen(
             onDismissRequest = { isIsoSelectorOpen = false },
             modifier = Modifier.background(Slate850)
         ) {
+            DropdownMenuItem(
+                text = { Text("Browse Device Storage...", fontWeight = FontWeight.Bold, color = WindowsCyan) },
+                leadingIcon = { Icon(Icons.Default.Folder, contentDescription = null, tint = WindowsCyan) },
+                onClick = {
+                    isIsoSelectorOpen = false
+                    liveIsoPickerLauncher.launch(arrayOf("*/*"))
+                }
+            )
             sampleIsos.forEach { name ->
                 DropdownMenuItem(
                     text = { Text(name, color = MaterialTheme.colorScheme.onSurface) },

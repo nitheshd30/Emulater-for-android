@@ -94,16 +94,27 @@ class VmRuntimeManager {
     private val _state = MutableStateFlow(VmRuntimeState())
     val state: StateFlow<VmRuntimeState> = _state.asStateFlow()
 
+    var onInstallationCompleted: ((VirtualMachine) -> Unit)? = null
+
     fun startVm(vm: VirtualMachine) {
         bootJob?.cancel()
         telemetryJob?.cancel()
+
+        val hasIso = vm.isoPath.isNotEmpty() || vm.isoName.isNotEmpty()
+        val isoDisplayName = when {
+            vm.isoName.isNotEmpty() -> vm.isoName
+            vm.isoPath.isNotEmpty() -> vm.isoPath.substringAfterLast("/")
+            else -> "Windows_11_ARM64_Pro.iso"
+        }
+
+        val isArm64 = vm.arch == "aarch64" || vm.arch.isEmpty() || vm.osType.contains("ARM")
 
         _state.value = VmRuntimeState(
             vm = vm,
             bootState = VmBootState.UEFI_INIT,
             bootProgress = 0f,
-            isIsoMounted = vm.isoPath.isNotEmpty() || vm.isoName.isNotEmpty(),
-            currentIsoName = if (vm.isoName.isNotEmpty()) vm.isoName else "windows_11_arm64.iso",
+            isIsoMounted = hasIso,
+            currentIsoName = isoDisplayName,
             telemetry = VmTelemetry(
                 guestRamTotalMb = vm.ramMb,
                 guestRamUsedMb = (vm.ramMb * 0.35f).toInt(),
@@ -116,10 +127,10 @@ class VmRuntimeManager {
                 TerminalLine("C:\\Users\\Admin> systeminfo", isCommand = true),
                 TerminalLine("OS Name:                   Microsoft Windows 11 Pro"),
                 TerminalLine("OS Version:                10.0.26100 N/A Build 26100"),
-                TerminalLine("System Type:               ARM64-based PC"),
+                TerminalLine("System Type:               ${if (isArm64) "ARM64-based PC" else "x64-based PC"}"),
                 TerminalLine("Processor(s):              1 Processor(s) Installed."),
-                TerminalLine("                           [01]: ARMv8 (64-bit) ${vm.cpuCores} Cores @ 2.84 GHz"),
-                TerminalLine("Hypervisor Detected:       KVM / QEMU VirtIO Hypervisor"),
+                TerminalLine("                           [01]: ${if (isArm64) "ARMv8 (64-bit)" else "x86_64"} ${vm.cpuCores} Cores @ 2.84 GHz"),
+                TerminalLine("Hypervisor Detected:       ${if (vm.useKvm) "KVM Hardware Virtualization" else "QEMU TCG JIT Engine"}"),
                 TerminalLine("Total Physical Memory:     ${vm.ramMb} MB"),
                 TerminalLine("Available Physical Memory: ${(vm.ramMb * 0.65f).toInt()} MB"),
                 TerminalLine("Network Card(s):           Red Hat VirtIO Ethernet Adapter #1"),
@@ -129,18 +140,33 @@ class VmRuntimeManager {
 
         bootJob = scope.launch {
             // Stage 1: UEFI BIOS & EDK2 Init
-            val uefiLogs = listOf(
-                "UEFI EDK2 Firmware v2024.08-arm64 initializing...",
-                "SEC: Secure boot variables loaded.",
-                "PEI: Initializing RAM (${vm.ramMb} MB found).",
-                "DXE: Enumerating PCI Bus: VirtIO-GPU, VirtIO-Net, VirtIO-Block.",
-                "BDS: Boot Device Selection -> CD-ROM (Windows 11 ARM ISO)",
-                "ACPI: SSDT / DSDT tables injected for ARM64 hypervisor.",
-                "EFI: Loading bootarm64.efi into memory..."
-            )
+            val uefiLogs = if (isArm64) {
+                listOf(
+                    "UEFI EDK2 Firmware v2024.08-arm64 initializing...",
+                    "SEC: Secure boot variables loaded (BypassSecureBoot=${vm.bypassSecureBoot}).",
+                    "PEI: Initializing RAM (${vm.ramMb} MB allocated).",
+                    "DXE: Enumerating PCI Bus: VirtIO-GPU, VirtIO-Net, VirtIO-SCSI.",
+                    "BDS: Boot Device Selection -> CD-ROM ($isoDisplayName)",
+                    if (vm.bypassTpm) "ACPI: Injecting LabConfig TPM 2.0 & RAM check bypass table..." else "ACPI: Initializing TPM 2.0 TIS device...",
+                    "VirtIO: Injected storage driver VirtIO-SCSI into PE environment.",
+                    "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
+                    "EFI: Loading \\EFI\\BOOT\\BOOTAA64.EFI into guest memory..."
+                )
+            } else {
+                listOf(
+                    "OVMF UEFI x86_64 Firmware initializing in QEMU TCG translation mode...",
+                    "SEC: Initializing x86_64 vCPU state (${vm.cpuCores} cores)...",
+                    "PEI: Memory map configured (${vm.ramMb} MB allocated).",
+                    "DXE: Enumerating Q35 PCI Express Root Complex & VirtIO devices.",
+                    "BDS: Target CD-ROM attached: $isoDisplayName",
+                    "ACPI: Injecting LabConfig TPM 2.0 bypass...",
+                    "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
+                    "EFI: Loading \\EFI\\BOOT\\BOOTX64.EFI into guest memory..."
+                )
+            }
 
             for (i in uefiLogs.indices) {
-                delay(280)
+                delay(240)
                 val log = uefiLogs[i]
                 _state.update {
                     it.copy(
@@ -152,15 +178,16 @@ class VmRuntimeManager {
 
             // Stage 2: Windows 11 Booting Animation
             _state.update { it.copy(bootState = VmBootState.WINDOWS_BOOTING) }
-            delay(1800)
+            delay(1600)
 
             // Stage 3: Windows Setup or Desktop
-            if (!vm.isInstalled && vm.isoPath.isNotEmpty()) {
+            if (!vm.isInstalled && hasIso) {
                 _state.update {
                     it.copy(
                         bootState = VmBootState.WINDOWS_SETUP_OOBE,
                         bootProgress = 1f,
-                        setupProgressPercent = 0
+                        setupProgressPercent = 0,
+                        setupCurrentStep = "Preparing Windows 11 installation..."
                     )
                 }
             } else {
@@ -215,18 +242,26 @@ class VmRuntimeManager {
         scope.launch {
             _state.update {
                 it.copy(
-                    setupCurrentStep = "Restarting into Windows 11 ARM64...",
+                    setupCurrentStep = "Restarting into Windows 11 ARM64 Desktop...",
                     setupProgressPercent = 100
                 )
             }
-            delay(1200)
+            delay(1000)
+
+            val currentVm = _state.value.vm
+            if (currentVm != null) {
+                val updatedVm = currentVm.copy(isInstalled = true)
+                _state.update { it.copy(vm = updatedVm) }
+                onInstallationCompleted?.invoke(updatedVm)
+            }
+
             _state.update {
                 it.copy(
                     bootState = VmBootState.WINDOWS_BOOTING,
-                    toastMessage = "Windows 11 installed successfully to VirtIO drive!"
+                    toastMessage = "Windows 11 installed successfully! Disk is now bootable."
                 )
             }
-            delay(1600)
+            delay(1400)
             _state.update {
                 it.copy(
                     bootState = VmBootState.WINDOWS_DESKTOP,
@@ -367,7 +402,7 @@ class VmRuntimeManager {
                 newLines.add(TerminalLine("Host Name:                 WIN11-ARM64-VM"))
                 newLines.add(TerminalLine("OS Name:                   Microsoft Windows 11 Pro ARM64"))
                 newLines.add(TerminalLine("OS Version:                10.0.26100 N/A Build 26100.1742"))
-                newLines.add(TerminalLine("System Manufacturer:       QEMU / UTM Android Hypervisor"))
+                newLines.add(TerminalLine("System Manufacturer:       QEMU / WinDroid Android Hypervisor"))
                 newLines.add(TerminalLine("System Model:              KVM ARM Virtual Machine"))
                 newLines.add(TerminalLine("System Type:               ARM64-based PC"))
                 newLines.add(TerminalLine("Processor(s):              ${vm?.cpuCores ?: 4} Cores ARMv8 Cortex-A76"))
@@ -382,6 +417,7 @@ class VmRuntimeManager {
                 newLines.add(TerminalLine("  HKLM\\SYSTEM\\Setup\\LabConfig\\BypassSecureBootCheck = 1"))
                 newLines.add(TerminalLine("  HKLM\\SYSTEM\\Setup\\LabConfig\\BypassRAMCheck = 1"))
                 newLines.add(TerminalLine("  HKLM\\SYSTEM\\Setup\\LabConfig\\BypassStorageCheck = 1"))
+                newLines.add(TerminalLine("  HKLM\\SYSTEM\\Setup\\LabConfig\\BypassNRO = 1 (Bypass Microsoft Account)"))
             }
             "kvm-status" -> {
                 val isKvm = _state.value.vm?.useKvm == true
@@ -493,7 +529,7 @@ class VmRuntimeManager {
         _state.update { it.copy(toastMessage = null) }
     }
 
-    fun mountIso(isoName: String) {
+    fun mountIso(isoName: String, isoPath: String = "") {
         _state.update {
             it.copy(
                 isIsoMounted = true,

@@ -6,20 +6,42 @@ object QemuCommandBuilder {
 
     fun buildQemuArguments(vm: VirtualMachine): List<String> {
         val args = mutableListOf<String>()
+        val isArm64 = vm.arch == "aarch64" || vm.arch.isEmpty() || vm.osType.contains("ARM")
 
-        // Base Binary & Machine Type
-        args.add("qemu-system-aarch64")
-        args.add("-M")
-        args.add("virt,highmem=on,virtualization=on")
+        if (isArm64) {
+            // ARM64 Virtual Machine
+            args.add("qemu-system-aarch64")
+            args.add("-M")
+            args.add("virt,highmem=on,virtualization=on")
 
-        // CPU & Hypervisor
-        if (vm.useKvm) {
-            args.add("-enable-kvm")
-            args.add("-cpu")
-            args.add("host")
+            // CPU & Hypervisor
+            if (vm.useKvm) {
+                args.add("-enable-kvm")
+                args.add("-cpu")
+                args.add("host")
+            } else {
+                args.add("-cpu")
+                args.add(vm.cpuModel.ifEmpty { "cortex-a76" })
+            }
+
+            // UEFI Firmware & NVRAM
+            args.add("-drive")
+            args.add("if=pflash,format=raw,readonly=on,file=QEMU_EFI.fd")
+            args.add("-drive")
+            args.add("if=pflash,format=raw,file=vars.fd")
         } else {
+            // x86_64 Virtual Machine (TCG Emulation mode)
+            args.add("qemu-system-x86_64")
+            args.add("-M")
+            args.add("q35,accel=tcg")
             args.add("-cpu")
-            args.add(vm.cpuModel.ifEmpty { "cortex-a76" })
+            args.add("max")
+
+            // OVMF UEFI for x86_64
+            args.add("-drive")
+            args.add("if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd")
+            args.add("-drive")
+            args.add("if=pflash,format=raw,file=OVMF_VARS.fd")
         }
 
         // SMP Cores & RAM
@@ -28,12 +50,6 @@ object QemuCommandBuilder {
         args.add("-m")
         args.add("${vm.ramMb}M")
 
-        // UEFI Firmware & NVRAM
-        args.add("-drive")
-        args.add("if=pflash,format=raw,readonly=on,file=QEMU_EFI.fd")
-        args.add("-drive")
-        args.add("if=pflash,format=raw,file=vars.fd")
-
         // Hard Disk
         val diskFile = if (vm.diskPath.isNotEmpty()) vm.diskPath else "win11_arm.${vm.diskFormat}"
         args.add("-device")
@@ -41,16 +57,17 @@ object QemuCommandBuilder {
         args.add("-drive")
         args.add("if=none,id=drive0,file=$diskFile,format=${vm.diskFormat},cache=writeback,discard=unmap")
 
-        // CD-ROM / ISO image
-        if (vm.isoPath.isNotEmpty() || vm.isoName.isNotEmpty()) {
-            val isoTarget = if (vm.isoName.isNotEmpty()) vm.isoName else "windows_11_arm.iso"
+        // CD-ROM / ISO image (bootindex=0 to prioritize CD boot when attached)
+        val hasIso = vm.isoPath.isNotEmpty() || vm.isoName.isNotEmpty()
+        if (hasIso) {
+            val isoTarget = if (vm.isoPath.isNotEmpty()) vm.isoPath else vm.isoName
             args.add("-device")
             args.add("usb-storage,drive=cdrom0,bootindex=0")
             args.add("-drive")
             args.add("if=none,id=cdrom0,file=$isoTarget,media=cdrom,readonly=on")
         }
 
-        // VirtIO Windows Drivers ISO (if enabled)
+        // VirtIO Windows Drivers ISO (for SCSI & Net drivers during setup)
         if (vm.virtIoDriversEnabled) {
             args.add("-device")
             args.add("usb-storage,drive=virtio_iso")
@@ -112,7 +129,7 @@ object QemuCommandBuilder {
             args.add("virtio-net-pci,netdev=net0")
         }
 
-        // TPM 2.0 Emulator (if not bypassed or emulated via swtpm)
+        // TPM 2.0 Emulator
         if (!vm.bypassTpm) {
             args.add("-chardev")
             args.add("socket,id=chrtpm,path=/tmp/swtpm-sock")
@@ -145,15 +162,17 @@ object QemuCommandBuilder {
 
     fun buildTermuxScript(vm: VirtualMachine): String {
         val cmd = buildCommandLineString(vm)
+        val isArm = vm.arch == "aarch64" || vm.arch.isEmpty()
         return """
             #!/data/data/com.termux/files/usr/bin/bash
             # ========================================================
-            # UTM WinARM VM Launcher for Android (Windows 11 ARM64)
+            # WinDroid Hypervisor VM Launcher
             # Machine: ${vm.name}
+            # Arch: ${if (isArm) "ARM64 (Native KVM)" else "x86_64 (TCG JIT)"}
             # Cores: ${vm.cpuCores} | RAM: ${vm.ramMb}MB | KVM: ${vm.useKvm}
             # ========================================================
             
-            echo "Starting WinARM VM: ${vm.name}..."
+            echo "Starting WinDroid VM: ${vm.name}..."
             echo "Checking KVM acceleration support..."
             
             if [ -e /dev/kvm ]; then
@@ -163,7 +182,7 @@ object QemuCommandBuilder {
                 echo "[INFO] KVM node not detected, fallback to TCG JIT compiler."
             fi
             
-            # Execute QEMU ARM64 Hypervisor
+            # Execute QEMU Hypervisor
             $cmd
         """.trimIndent()
     }

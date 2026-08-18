@@ -3,9 +3,14 @@ package com.example.ui.screens
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,13 +27,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DiscFull
+import androidx.compose.material.icons.filled.Eject
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
@@ -37,6 +47,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,6 +57,9 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -60,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -68,6 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.VirtualMachine
+import com.example.engine.IsoInspector
 import com.example.engine.QemuCommandBuilder
 import com.example.ui.components.StatusBadge
 import com.example.ui.components.WindowsLogoMini
@@ -100,7 +116,11 @@ fun VmDetailSettingsScreen(
     var name by remember { mutableStateOf(vm.name) }
     var cpuCores by remember { mutableFloatStateOf(vm.cpuCores.toFloat()) }
     var ramMb by remember { mutableFloatStateOf(vm.ramMb.toFloat()) }
+    var isoPath by remember { mutableStateOf(vm.isoPath) }
     var isoName by remember { mutableStateOf(vm.isoName) }
+    var isoSizeBytes by remember { mutableStateOf(vm.isoSizeBytes) }
+    var arch by remember { mutableStateOf(vm.arch) }
+    var isInstalled by remember { mutableStateOf(vm.isInstalled) }
     var bypassTpm by remember { mutableStateOf(vm.bypassTpm) }
     var bypassSecureBoot by remember { mutableStateOf(vm.bypassSecureBoot) }
     var bypassRamCheck by remember { mutableStateOf(vm.bypassRamCheck) }
@@ -109,15 +129,48 @@ fun VmDetailSettingsScreen(
     var showSnapshotDialog by remember { mutableStateOf(false) }
     var snapshotTitle by remember { mutableStateOf("") }
     var showQemuCliDialog by remember { mutableStateOf(false) }
+    var showIsoSourcesDialog by remember { mutableStateOf(false) }
 
-    val qemuCommand = remember(vm, cpuCores, ramMb, useKvm, isoName) {
-        val updated = vm.copy(
+    // SAF Document Picker for ISO
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (_: Exception) {}
+
+            isoPath = uri.toString()
+            val inspection = IsoInspector.inspectUri(context, uri)
+            isoName = inspection.fileName
+            isoSizeBytes = inspection.fileSizeBytes
+            if (!inspection.isArm64Iso) {
+                arch = "x86_64"
+            }
+            Toast.makeText(context, "Selected ISO: ${inspection.fileName} (${inspection.fileSizeFormatted})", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val currentVmConfig = remember(name, cpuCores, ramMb, isoPath, isoName, isoSizeBytes, arch, isInstalled, bypassTpm, bypassSecureBoot, bypassRamCheck, useKvm) {
+        vm.copy(
+            name = name,
             cpuCores = cpuCores.toInt(),
             ramMb = ramMb.toInt(),
-            useKvm = useKvm,
-            isoName = isoName
+            isoPath = isoPath,
+            isoName = isoName,
+            isoSizeBytes = isoSizeBytes,
+            arch = arch,
+            isInstalled = isInstalled,
+            bypassTpm = bypassTpm,
+            bypassSecureBoot = bypassSecureBoot,
+            bypassRamCheck = bypassRamCheck,
+            useKvm = useKvm
         )
-        QemuCommandBuilder.buildCommandLineString(updated)
+    }
+
+    val cliString = remember(currentVmConfig) {
+        QemuCommandBuilder.buildCommandLineString(currentVmConfig)
     }
 
     Scaffold(
@@ -170,24 +223,15 @@ fun VmDetailSettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(vm.osVersionDisplay, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                        Text("Architecture: ${vm.arch} (ARM64)", fontSize = 12.sp, color = Slate400)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text("Architecture: ${arch.uppercase()} • ${if (isInstalled) "Disk Bootable (Installed)" else "Setup Mode (ISO Boot)"}", fontSize = 12.sp, color = Slate400)
                     }
                     Button(
                         onClick = {
-                            val updated = vm.copy(
-                                name = name,
-                                cpuCores = cpuCores.toInt(),
-                                ramMb = ramMb.toInt(),
-                                isoName = isoName,
-                                bypassTpm = bypassTpm,
-                                bypassSecureBoot = bypassSecureBoot,
-                                bypassRamCheck = bypassRamCheck,
-                                useKvm = useKvm
-                            )
-                            viewModel.saveVm(updated)
-                            onLaunchVm(updated)
+                            viewModel.saveVm(currentVmConfig)
+                            onLaunchVm(currentVmConfig)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = WindowsCyan, contentColor = Slate900),
                         shape = RoundedCornerShape(10.dp),
@@ -200,7 +244,7 @@ fun VmDetailSettingsScreen(
                 }
             }
 
-            // General & Hardware Config
+            // General & Hardware Settings Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -210,6 +254,7 @@ fun VmDetailSettingsScreen(
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     Text("Machine Configuration", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = WindowsCyan)
 
+                    // VM Name
                     OutlinedTextField(
                         value = name,
                         onValueChange = { name = it },
@@ -218,12 +263,15 @@ fun VmDetailSettingsScreen(
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = WindowsCyan,
                             unfocusedBorderColor = Slate700,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                             focusedContainerColor = Slate850,
                             unfocusedContainerColor = Slate850
-                        )
+                        ),
+                        shape = RoundedCornerShape(10.dp)
                     )
 
-                    // CPU Slider
+                    // CPU Cores Slider
                     Column {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("CPU Cores", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Slate300)
@@ -252,9 +300,29 @@ fun VmDetailSettingsScreen(
                             colors = SliderDefaults.colors(thumbColor = KvmGreen, activeTrackColor = KvmGreen)
                         )
                     }
+                }
+            }
 
-                    // Virtual Storage & CD-ROM ISO
-                    Text("Storage & Drives", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Slate300)
+            // Virtual Storage & CD-ROM ISO Card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = Slate900),
+                border = CardDefaults.outlinedCardBorder().copy(brush = Brush.linearGradient(listOf(Slate700, Slate800)))
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Storage & CD-ROM Media", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = WindowsCyan)
+                        IconButton(onClick = { showIsoSourcesDialog = true }) {
+                            Icon(Icons.Default.CloudDownload, contentDescription = "Download ISO Guide", tint = WindowsCyan)
+                        }
+                    }
+
+                    // Virtual Hard Disk
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -262,15 +330,99 @@ fun VmDetailSettingsScreen(
                             .background(Slate850)
                             .padding(12.dp)
                     ) {
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Storage, contentDescription = null, tint = WindowsCyan, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Virtual Hard Drive: ${vm.diskSizeGb} GB (${vm.diskFormat.uppercase()})", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Storage, contentDescription = null, tint = WindowsCyan, modifier = Modifier.size(20.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text("Virtual Hard Drive (C:)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                Text("${vm.diskSizeGb} GB • ${vm.diskFormat.uppercase()} • VirtIO-SCSI Driver Active", fontSize = 11.sp, color = Slate400)
                             }
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("CD-ROM: ${if (isoName.isNotEmpty()) isoName else "No ISO mounted"}", fontSize = 12.sp, color = Slate400)
                         }
+                    }
+
+                    // CD-ROM / ISO image
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Slate850)
+                            .border(1.dp, if (isoName.isNotEmpty()) KvmGreen.copy(alpha = 0.4f) else Slate700, RoundedCornerShape(10.dp))
+                            .padding(12.dp)
+                    ) {
+                        Column {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        Icons.Default.DiscFull,
+                                        contentDescription = null,
+                                        tint = if (isoName.isNotEmpty()) KvmGreen else Slate400,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text("Virtual CD-ROM Drive (D:)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(
+                                            text = if (isoName.isNotEmpty()) isoName else "No ISO mounted (Empty)",
+                                            fontSize = 11.sp,
+                                            color = if (isoName.isNotEmpty()) WindowsCyan else Slate400,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
+                                    colors = ButtonDefaults.buttonColors(containerColor = WindowsCyan, contentColor = Slate900),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(Icons.Default.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Change ISO", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                if (isoName.isNotEmpty()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            isoPath = ""
+                                            isoName = ""
+                                            isoSizeBytes = 0L
+                                            Toast.makeText(context, "ISO Ejected", Toast.LENGTH_SHORT).show()
+                                        },
+                                        shape = RoundedCornerShape(8.dp),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFFB74D)),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(Icons.Default.Eject, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Eject ISO", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Save Changes Button
+                    Button(
+                        onClick = {
+                            viewModel.saveVm(currentVmConfig)
+                            Toast.makeText(context, "Settings saved successfully!", Toast.LENGTH_SHORT).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Slate800, contentColor = WindowsCyan),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Save Configuration Changes", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -380,101 +532,102 @@ fun VmDetailSettingsScreen(
                     }
                 }
             }
-
-            // Save Changes Button
-            Button(
-                onClick = {
-                    val updated = vm.copy(
-                        name = name,
-                        cpuCores = cpuCores.toInt(),
-                        ramMb = ramMb.toInt(),
-                        isoName = isoName,
-                        bypassTpm = bypassTpm,
-                        bypassSecureBoot = bypassSecureBoot,
-                        bypassRamCheck = bypassRamCheck,
-                        useKvm = useKvm
-                    )
-                    viewModel.saveVm(updated)
-                    Toast.makeText(context, "Configuration saved!", Toast.LENGTH_SHORT).show()
-                    onNavigateBack()
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = WindowsCyan, contentColor = Slate900),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxWidth().testTag("btn_save_vm_changes")
-            ) {
-                Icon(Icons.Default.Check, contentDescription = null)
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Save Configuration", fontWeight = FontWeight.Bold)
-            }
         }
     }
 
-    // Snapshot Dialog
+    // Take Snapshot Dialog
     if (showSnapshotDialog) {
         AlertDialog(
             onDismissRequest = { showSnapshotDialog = false },
-            title = { Text("Create VM Snapshot") },
+            containerColor = Slate900,
+            title = { Text("Take VM Snapshot", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text("Enter a label for this virtual machine restore point:")
+                    Text("Enter a label for this restore point (e.g. 'Before Windows Update', 'Fresh Install'):", fontSize = 12.sp, color = Slate400)
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = snapshotTitle,
                         onValueChange = { snapshotTitle = it },
-                        placeholder = { Text("e.g. Fresh Windows 11 Install") },
-                        modifier = Modifier.fillMaxWidth()
+                        placeholder = { Text("Snapshot Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = WindowsCyan,
+                            unfocusedBorderColor = Slate700,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            focusedContainerColor = Slate850,
+                            unfocusedContainerColor = Slate850
+                        )
                     )
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    viewModel.takeSnapshot(vm.id, snapshotTitle)
-                    showSnapshotDialog = false
-                    snapshotTitle = ""
-                }) {
+                Button(
+                    onClick = {
+                        if (snapshotTitle.isNotBlank()) {
+                            viewModel.takeSnapshot(vm.id, snapshotTitle)
+                            snapshotTitle = ""
+                            showSnapshotDialog = false
+                            Toast.makeText(context, "Snapshot created", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = WindowsCyan, contentColor = Slate900)
+                ) {
                     Text("Save Snapshot")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showSnapshotDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", color = Slate400)
                 }
             }
         )
     }
 
-    // QEMU CLI / Termux Script Dialog
+    // QEMU CLI Preview Dialog
     if (showQemuCliDialog) {
         AlertDialog(
             onDismissRequest = { showQemuCliDialog = false },
-            title = { Text("QEMU ARM64 Command Line") },
+            containerColor = Slate900,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Terminal, contentDescription = null, tint = WindowsCyan)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("QEMU Command Line", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                    Text("You can run this virtual machine via Termux, Shizuku, or native Linux shell on Android with full KVM acceleration:", fontSize = 12.sp, color = Slate300)
-                    Spacer(modifier = Modifier.height(10.dp))
+                Column {
+                    Text("Below is the hypervisor arguments string generated for this VM:", fontSize = 12.sp, color = Slate400)
+                    Spacer(modifier = Modifier.height(8.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Slate850)
+                            .background(Slate950)
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = qemuCommand,
+                            text = cliString,
+                            fontSize = 11.sp,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            color = WindowsCyan
+                            color = KvmGreen,
+                            lineHeight = 14.sp
                         )
                     }
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    val clipMan = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipMan.setPrimaryClip(ClipData.newPlainText("QEMU Command", qemuCommand))
-                    Toast.makeText(context, "QEMU command copied to clipboard!", Toast.LENGTH_SHORT).show()
-                    showQemuCliDialog = false
-                }) {
+                Button(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = ClipData.newPlainText("QEMU Command", cliString)
+                        clipboard.setPrimaryClip(clip)
+                        Toast.makeText(context, "QEMU command copied to clipboard!", Toast.LENGTH_SHORT).show()
+                        showQemuCliDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = WindowsCyan, contentColor = Slate900)
+                ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Copy CLI")
@@ -482,9 +635,85 @@ fun VmDetailSettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showQemuCliDialog = false }) {
-                    Text("Close")
+                    Text("Close", color = Slate400)
+                }
+            }
+        )
+    }
+
+    // Official ISO Downloader Dialog
+    if (showIsoSourcesDialog) {
+        val sources = IsoInspector.getOfficialIsoSources()
+        AlertDialog(
+            onDismissRequest = { showIsoSourcesDialog = false },
+            containerColor = Slate900,
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null, tint = WindowsCyan)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Download Windows 11 ARM ISO", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                }
+            },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    sources.forEach { source ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    try {
+                                        val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(source.url))
+                                        context.startActivity(browserIntent)
+                                    } catch (_: Exception) {}
+                                },
+                            colors = CardDefaults.cardColors(containerColor = Slate850),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(source.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = WindowsCyan)
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(source.description, fontSize = 11.sp, color = Slate400)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showIsoSourcesDialog = false }) {
+                    Text("Done", color = WindowsCyan, fontWeight = FontWeight.Bold)
                 }
             }
         )
     }
 }
+
+@Composable
+fun SettingSwitchItem(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+            Text(subtitle, fontSize = 11.sp, color = Slate400)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(checkedThumbColor = WindowsCyan, checkedTrackColor = Slate800)
+        )
+    }
+}
+
+val Slate950 = Color(0xFF030712)
