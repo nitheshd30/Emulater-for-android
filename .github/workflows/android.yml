@@ -11,10 +11,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
 
     - name: set up JDK 17
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v5
       with:
         java-version: '17'
         distribution: 'temurin'
@@ -22,11 +22,20 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
 
+    - name: Generate Debug Keystore
+      run: keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
+
     - name: Build Debug APK
       run: gradle assembleDebug --no-daemon --no-configuration-cache
 
+    - name: Generate Release Keystore
+      run: keytool -genkey -v -keystore my-upload-key.jks -storepass password123 -alias upload -keypass password123 -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Release"
+
     - name: Build Release AAB
       run: gradle bundleRelease --no-daemon --no-configuration-cache
+      env:
+        STORE_PASSWORD: password123
+        KEY_PASSWORD: password123
 
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
