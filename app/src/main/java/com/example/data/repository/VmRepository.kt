@@ -20,6 +20,8 @@ class VmRepository(private val vmDao: VmDao) {
 
     suspend fun deleteVmById(id: Long) = vmDao.deleteVmById(id)
 
+    suspend fun deleteAllVms() = vmDao.deleteAllVms()
+
     suspend fun setVmStatus(id: Long, status: String) = vmDao.updateVmStatus(id, status)
 
     suspend fun markLastRun(id: Long) = vmDao.updateLastRun(id, System.currentTimeMillis())

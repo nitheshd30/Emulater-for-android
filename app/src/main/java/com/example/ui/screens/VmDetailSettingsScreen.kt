@@ -94,6 +94,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.WindowsCyan
 import com.example.ui.viewmodel.VmViewModel
 import java.text.SimpleDateFormat
@@ -189,6 +190,12 @@ fun VmDetailSettingsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = { 
+                        viewModel.saveVm(currentVmConfig)
+                        Toast.makeText(context, "Settings Saved", Toast.LENGTH_SHORT).show()
+                    }) {
+                        Icon(Icons.Default.Save, contentDescription = "Save Settings", tint = KvmGreen)
+                    }
                     IconButton(onClick = { showQemuCliDialog = true }) {
                         Icon(Icons.Default.Terminal, contentDescription = "QEMU CLI", tint = WindowsCyan)
                     }
@@ -299,6 +306,11 @@ fun VmDetailSettingsScreen(
                             steps = 14,
                             colors = SliderDefaults.colors(thumbColor = KvmGreen, activeTrackColor = KvmGreen)
                         )
+                        if (ramMb > hardware.totalRamMb * 0.75f) {
+                            Text("⚠️ High RAM allocation may cause out-of-memory (OOM) errors during the Windows boot process. Reduce if crashes occur.", fontSize = 11.sp, color = WarningAmber, modifier = Modifier.padding(top = 4.dp))
+                        } else if (ramMb < 2048f && !bypassRamCheck) {
+                            Text("⚠️ Windows 11 requires at least 4GB (or 2GB with bypass) of RAM. Boot may fail.", fontSize = 11.sp, color = WarningAmber, modifier = Modifier.padding(top = 4.dp))
+                        }
                     }
                 }
             }

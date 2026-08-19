@@ -35,7 +35,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -131,6 +136,18 @@ fun HomeScreen(
     var vmToDelete by remember { mutableStateOf<VirtualMachine?>(null) }
     var vmForSnapshot by remember { mutableStateOf<VirtualMachine?>(null) }
     var snapshotTitleInput by remember { mutableStateOf("") }
+    var showClearAllDialog by remember { mutableStateOf(false) }
+
+    val directIsoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: android.net.Uri? ->
+        if (uri != null) {
+            viewModel.createVmFromIsoUri(uri) { createdVm ->
+                viewModel.launchVm(createdVm)
+                onNavigateRunner(createdVm)
+            }
+        }
+    }
 
     // Compute effective status for each VM considering active runtimeState
     fun getEffectiveStatus(vm: VirtualMachine): String {
@@ -183,7 +200,9 @@ fun HomeScreen(
                     onToggleSearch = {
                         isSearchActive = !isSearchActive
                         if (!isSearchActive) searchQuery = ""
-                    }
+                    },
+                    hasVms = vms.isNotEmpty(),
+                    onClearAll = { showClearAllDialog = true }
                 )
             }
 
@@ -496,7 +515,9 @@ fun HomeScreen(
 fun DashboardHeader(
     onNavigateGuide: () -> Unit,
     isSearchActive: Boolean,
-    onToggleSearch: () -> Unit
+    onToggleSearch: () -> Unit,
+    hasVms: Boolean = false,
+    onClearAll: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),

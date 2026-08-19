@@ -33,6 +33,9 @@ interface VmDao {
     @Query("DELETE FROM virtual_machines WHERE id = :id")
     suspend fun deleteVmById(id: Long)
 
+    @Query("DELETE FROM virtual_machines")
+    suspend fun deleteAllVms()
+
     @Query("UPDATE virtual_machines SET status = :status WHERE id = :id")
     suspend fun updateVmStatus(id: Long, status: String)
 

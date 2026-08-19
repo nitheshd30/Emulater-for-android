@@ -1,6 +1,7 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -55,37 +57,26 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
             saveVm(updatedVm)
         }
 
-        // Seed initial default Windows 11 ARM VM if list is empty
+        // Clean up any legacy dummy sample VM automatically
         viewModelScope.launch {
-            repository.allVms.collect { list ->
-                if (list.isEmpty()) {
-                    val hw = _hardwareInfo.value
-                    val defaultWin11 = VirtualMachine(
-                        name = "Windows 11 ARM64",
-                        osType = "WINDOWS_11_ARM",
-                        arch = "aarch64",
-                        cpuCores = (hw.cpuCores / 2).coerceIn(2, 6),
-                        ramMb = hw.recommendedVmRamMb,
-                        diskSizeGb = 64,
-                        diskFormat = "qcow2",
-                        isoName = "Windows_11_ARM64_English_Pro.iso",
-                        isoPath = "content://com.android.providers.downloads/win11_arm64.iso",
-                        isoSizeBytes = 5732104192L,
-                        useKvm = hw.isKvmAvailable,
-                        bypassTpm = true,
-                        bypassSecureBoot = true,
-                        bypassRamCheck = true,
-                        bypassOobeNetwork = true,
-                        virtIoDriversEnabled = true,
-                        displayResolution = "1600x900",
-                        gpuMode = "VIRGL",
-                        audioDevice = "INTEL_HDA",
-                        networkMode = "USER_SLIRP",
-                        osVersionDisplay = "Windows 11 Pro (24H2 ARM64)"
-                    )
-                    repository.insertVm(defaultWin11)
+            val list = repository.allVms.firstOrNull() ?: emptyList()
+            for (vm in list) {
+                if (vm.isoPath == "content://com.android.providers.downloads/win11_arm64.iso" ||
+                    vm.isoName == "Windows_11_ARM64_English_Pro.iso" ||
+                    vm.name == "Windows 11 ARM64 (Sample)"
+                ) {
+                    repository.deleteVm(vm)
                 }
             }
+        }
+    }
+
+    fun clearAllVms() {
+        viewModelScope.launch {
+            if (runtimeState.value.vm != null) {
+                runtimeManager.stopVm()
+            }
+            repository.deleteAllVms()
         }
     }
 
@@ -111,6 +102,42 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearIsoInspection() {
         _currentIsoInspection.value = null
+    }
+
+    fun createVmFromIso(uri: Uri, customName: String? = null, onCreated: (VirtualMachine) -> Unit) {
+        val inspection = IsoInspector.inspectUri(getApplication(), uri)
+        val hw = _hardwareInfo.value
+        val detectedArch = if (inspection.isArm64Iso) "aarch64" else "x86_64"
+
+        val newVm = VirtualMachine(
+            name = customName?.takeIf { it.isNotBlank() } ?: inspection.fileName.substringBeforeLast(".").ifEmpty { "Windows VM" },
+            osType = if (inspection.isArm64Iso) "WINDOWS_11_ARM" else "WINDOWS_11_X64",
+            arch = detectedArch,
+            cpuCores = (hw.cpuCores / 2).coerceIn(2, 6),
+            ramMb = hw.recommendedVmRamMb,
+            diskSizeGb = 64,
+            diskFormat = "qcow2",
+            isoPath = uri.toString(),
+            isoName = inspection.fileName,
+            isoSizeBytes = inspection.fileSizeBytes,
+            useKvm = hw.isKvmAvailable && inspection.isArm64Iso,
+            bypassTpm = inspection.requiresTpmBypass,
+            bypassSecureBoot = true,
+            bypassRamCheck = true,
+            bypassOobeNetwork = true,
+            virtIoDriversEnabled = true,
+            displayResolution = "1600x900",
+            gpuMode = "VIRGL",
+            audioDevice = "INTEL_HDA",
+            networkMode = "USER_SLIRP",
+            osVersionDisplay = inspection.detectedOs
+        )
+
+        viewModelScope.launch {
+            val id = repository.insertVm(newVm)
+            val created = newVm.copy(id = id)
+            onCreated(created)
+        }
     }
 
     fun saveVm(vm: VirtualMachine, onSaved: (Long) -> Unit = {}) {
@@ -150,8 +177,9 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
         val hw = _hardwareInfo.value
         val template = when (osType) {
             "WIN11_TINY" -> VirtualMachine(
-                name = "Windows 11 Tiny ARM",
+                name = "Tiny11 ARM64",
                 osType = "WINDOWS_11_ARM",
+                arch = "aarch64",
                 cpuCores = 2,
                 ramMb = 2048,
                 diskSizeGb = 32,
@@ -166,6 +194,7 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
             "WIN10_ARM" -> VirtualMachine(
                 name = "Windows 10 ARM64",
                 osType = "WINDOWS_10_ARM",
+                arch = "aarch64",
                 cpuCores = 4,
                 ramMb = 3072,
                 diskSizeGb = 48,
@@ -178,6 +207,7 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
             "UBUNTU_ARM" -> VirtualMachine(
                 name = "Ubuntu 24.04 ARM64",
                 osType = "UBUNTU_ARM",
+                arch = "aarch64",
                 cpuCores = 4,
                 ramMb = 4096,
                 diskSizeGb = 32,
@@ -188,6 +218,7 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
             else -> VirtualMachine(
                 name = "Windows 11 ARM64 Pro",
                 osType = "WINDOWS_11_ARM",
+                arch = "aarch64",
                 cpuCores = (hw.cpuCores / 2).coerceIn(2, 6),
                 ramMb = hw.recommendedVmRamMb,
                 diskSizeGb = 64,
@@ -276,6 +307,43 @@ class VmViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteSnapshot(snapshot)
             loadSnapshots(snapshot.vmId)
+        }
+    }
+
+    fun createVmFromIsoUri(uri: Uri, onCreated: (VirtualMachine) -> Unit) {
+        viewModelScope.launch {
+            val app = getApplication<android.app.Application>()
+            try {
+                app.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            val inspection = IsoInspector.inspectUri(app, uri)
+            val hw = _hardwareInfo.value
+            val isArm = inspection.isArm64Iso
+            val detectedArch = if (isArm) "aarch64" else "x86_64"
+            val vmName = inspection.fileName.substringBeforeLast(".").replace("_", " ").ifEmpty {
+                if (isArm) "Windows 11 ARM64" else "Windows 11 x64"
+            }
+            val newVm = VirtualMachine(
+                name = vmName,
+                osType = if (isArm) "WINDOWS_11_ARM" else "WINDOWS_11_X64",
+                arch = detectedArch,
+                cpuCores = (hw.cpuCores / 2).coerceIn(2, 6),
+                ramMb = hw.recommendedVmRamMb,
+                diskSizeGb = 64,
+                isoPath = uri.toString(),
+                isoName = inspection.fileName,
+                isoSizeBytes = inspection.fileSizeBytes,
+                useKvm = hw.isKvmAvailable && isArm,
+                bypassTpm = true,
+                bypassSecureBoot = true,
+                bypassRamCheck = true,
+                bypassOobeNetwork = true,
+                virtIoDriversEnabled = true,
+                osVersionDisplay = if (isArm) "Windows 11 Pro (ARM64)" else "Windows 11 Pro (x86_64 TCG)"
+            )
+            val id = repository.insertVm(newVm)
+            val finalVm = newVm.copy(id = id)
+            onCreated(finalVm)
         }
     }
 

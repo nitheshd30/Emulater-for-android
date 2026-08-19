@@ -91,6 +91,7 @@ import com.example.ui.theme.Slate700
 import com.example.ui.theme.Slate800
 import com.example.ui.theme.Slate850
 import com.example.ui.theme.Slate900
+import com.example.ui.theme.WarningAmber
 import com.example.ui.theme.WindowsBlue
 import com.example.ui.theme.WindowsCyan
 import com.example.ui.viewmodel.VmViewModel
@@ -111,11 +112,11 @@ fun CreateVmWizardScreen(
     val tabs = listOf("1. OS & Image", "2. Hardware", "3. Win11 Tweaks", "4. Display & Net")
 
     // Form state
-    var vmName by remember { mutableStateOf("Windows 11 ARM64 Pro") }
+    var vmName by remember { mutableStateOf("Windows 11 VM") }
     var selectedOsType by remember { mutableStateOf("WINDOWS_11_ARM") }
     var isoUriString by remember { mutableStateOf("") }
-    var isoFileName by remember { mutableStateOf("Windows_11_ARM64_Pro_24H2.iso") }
-    var isoSizeBytes by remember { mutableStateOf(5626896384L) }
+    var isoFileName by remember { mutableStateOf("") }
+    var isoSizeBytes by remember { mutableStateOf(0L) }
 
     var cpuCores by remember { mutableFloatStateOf((hardware.cpuCores / 2).coerceIn(2, 6).toFloat()) }
     var ramMb by remember { mutableFloatStateOf(hardware.recommendedVmRamMb.toFloat()) }
@@ -155,11 +156,17 @@ fun CreateVmWizardScreen(
     }
 
     // React to ISO inspection updates
-    if (isoInspection != null) {
-        isoFileName = isoInspection!!.fileName
-        isoSizeBytes = isoInspection!!.fileSizeBytes
-        if (isoInspection!!.isArm64Iso) {
-            selectedOsType = "WINDOWS_11_ARM"
+    androidx.compose.runtime.LaunchedEffect(isoInspection) {
+        isoInspection?.let { insp ->
+            isoFileName = insp.fileName
+            isoSizeBytes = insp.fileSizeBytes
+            if (insp.isArm64Iso) {
+                selectedOsType = "WINDOWS_11_ARM"
+                vmName = insp.fileName.substringBeforeLast(".").replace("_", " ").ifEmpty { "Windows 11 ARM64" }
+            } else {
+                selectedOsType = "WINDOWS_11_X64"
+                vmName = insp.fileName.substringBeforeLast(".").replace("_", " ").ifEmpty { "Windows 11 x64" }
+            }
         }
     }
 
@@ -349,13 +356,15 @@ fun CreateVmWizardScreen(
                                 Spacer(modifier = Modifier.height(12.dp))
 
                                 // Attached ISO Info Card
+                                val hasCustomIso = isoUriString.isNotBlank()
                                 val isArm = isoInspection?.isArm64Iso ?: true
+                                val effectiveName = if (isoFileName.isNotBlank()) isoFileName else if (hasCustomIso) "Custom Windows ISO" else "No ISO Selected"
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Slate850)
-                                        .border(1.dp, if (isArm) KvmGreen.copy(alpha = 0.5f) else WindowsCyan.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                                        .border(1.dp, if (hasCustomIso) KvmGreen.copy(alpha = 0.5f) else WindowsCyan.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
                                         .padding(12.dp)
                                 ) {
                                     Column {
@@ -368,12 +377,12 @@ fun CreateVmWizardScreen(
                                                 Icon(
                                                     imageVector = Icons.Default.Storage,
                                                     contentDescription = null,
-                                                    tint = if (isArm) KvmGreen else Color(0xFFFFB74D),
+                                                    tint = if (hasCustomIso) KvmGreen else WarningAmber,
                                                     modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(8.dp))
                                                 Text(
-                                                    text = isoFileName,
+                                                    text = effectiveName,
                                                     fontSize = 13.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = MaterialTheme.colorScheme.onSurface,
@@ -383,12 +392,16 @@ fun CreateVmWizardScreen(
 
                                             // Architecture Badge
                                             Surface(
-                                                color = if (isArm) KvmGreen.copy(alpha = 0.2f) else Color(0xFFFFB74D).copy(alpha = 0.2f),
+                                                color = if (hasCustomIso) {
+                                                    if (isArm) KvmGreen.copy(alpha = 0.2f) else Color(0xFFFFB74D).copy(alpha = 0.2f)
+                                                } else {
+                                                    Slate700
+                                                },
                                                 shape = RoundedCornerShape(6.dp)
                                             ) {
                                                 Text(
-                                                    text = if (isArm) "ARM64 Native" else "x86_64 TCG",
-                                                    color = if (isArm) KvmGreen else Color(0xFFFFB74D),
+                                                    text = if (hasCustomIso) (if (isArm) "ARM64 Native" else "x86_64 TCG") else "Optional",
+                                                    color = if (hasCustomIso) (if (isArm) KvmGreen else Color(0xFFFFB74D)) else Slate300,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -398,10 +411,12 @@ fun CreateVmWizardScreen(
 
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Text(
-                                            text = if (isoInspection != null) {
+                                            text = if (isoInspection != null && hasCustomIso) {
                                                 "Size: ${isoInspection!!.fileSizeFormatted} • ${isoInspection!!.detectedOs}\n${isoInspection!!.summaryNotes}"
+                                            } else if (hasCustomIso) {
+                                                "Custom disc image attached. Fully bootable with UEFI EDK2 & VirtIO drivers."
                                             } else {
-                                                "Default ARM64 disc image configured (~5.24 GB). Fully bootable with UEFI EDK2 & VirtIO drivers."
+                                                "Click 'Browse ISO' above to select your downloaded Windows 11/10 ISO file (.iso) from your phone storage."
                                             },
                                             fontSize = 11.sp,
                                             color = Slate400,
@@ -660,18 +675,23 @@ fun CreateVmWizardScreen(
                         Button(
                             onClick = {
                                 val detectedArch = if (isoInspection?.isArm64Iso == false || selectedOsType.contains("X64")) "x86_64" else "aarch64"
+                                val finalIsoName = when {
+                                    isoFileName.isNotBlank() -> isoFileName
+                                    isoUriString.isNotBlank() -> isoUriString.substringAfterLast("/")
+                                    else -> ""
+                                }
                                 val newVm = VirtualMachine(
-                                    name = vmName.ifEmpty { "Windows 11 ARM64" },
+                                    name = vmName.ifEmpty { if (detectedArch == "aarch64") "Windows 11 ARM64" else "Windows 11 x64" },
                                     osType = selectedOsType,
                                     arch = detectedArch,
                                     cpuCores = cpuCores.toInt(),
                                     ramMb = ramMb.toInt(),
                                     diskSizeGb = diskSizeGb.toInt(),
                                     diskFormat = diskFormat,
-                                    isoPath = isoUriString.ifEmpty { "content://com.android.providers.downloads/win11_arm64.iso" },
-                                    isoName = isoFileName,
+                                    isoPath = isoUriString,
+                                    isoName = finalIsoName,
                                     isoSizeBytes = isoSizeBytes,
-                                    useKvm = useKvm,
+                                    useKvm = useKvm && detectedArch == "aarch64",
                                     bypassTpm = bypassTpm,
                                     bypassSecureBoot = bypassSecureBoot,
                                     bypassRamCheck = bypassRamCheck,
@@ -682,7 +702,7 @@ fun CreateVmWizardScreen(
                                     audioDevice = audioDevice,
                                     networkMode = networkMode,
                                     portForwardRdp = portForwardRdp,
-                                    osVersionDisplay = if (detectedArch == "aarch64") "Windows 11 Pro (ARM64 24H2)" else "Windows 11 Pro (x86_64 TCG)"
+                                    osVersionDisplay = if (detectedArch == "aarch64") "Windows 11 Pro (ARM64)" else "Windows 11 Pro (x86_64 TCG)"
                                 )
                                 viewModel.saveVm(newVm) { id ->
                                     onVmCreated(newVm.copy(id = id))
