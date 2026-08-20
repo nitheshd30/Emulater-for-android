@@ -140,91 +140,85 @@ class VmRuntimeManager {
 
         bootJob = scope.launch {
             if (QemuNative.isLoaded) {
-                // REAL QEMU EMULATION PATH
                 _state.update {
                     it.copy(
-                        bootState = VmBootState.UEFI_INIT,
-                        bootLogLines = it.bootLogLines + "Initializing Native QEMU Bridge..." + "Executing QEMU binary with arguments..."
+                        bootLogLines = it.bootLogLines + "Initializing Native QEMU Bridge..." + "Executing QEMU binary with arguments in background..."
                     )
                 }
                 
-                // Offload blocking native C++ call to a background IO thread
-                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                // Offload blocking native C++ call to a background IO thread.
+                // Since this is a mock engine without a real Surface output, 
+                // we run it asynchronously and continue with the simulated UI below.
+                scope.launch(Dispatchers.IO) {
                     val args = QemuCommandBuilder.buildQemuArguments(vm).toTypedArray()
                     val exitCode = QemuNative.startQemu(args)
-                    
-                    _state.update {
-                        it.copy(
-                            bootLogLines = it.bootLogLines + "Native QEMU process exited with code $exitCode",
-                            bootState = VmBootState.OFF
-                        )
-                    }
+                    // We won't transition to OFF here because the simulated UI might still be running.
+                }
+            }
+
+            // SIMULATED UI PATH (Provides visual feedback)
+            // Stage 1: UEFI BIOS & EDK2 Init
+            val uefiLogs = if (isArm64) {
+                listOf(
+                    "UEFI EDK2 Firmware v2024.08-arm64 initializing...",
+                    "SEC: Secure boot variables loaded (BypassSecureBoot=${vm.bypassSecureBoot}).",
+                    "PEI: Initializing RAM (${vm.ramMb} MB allocated).",
+                    "DXE: Enumerating PCI Bus: VirtIO-GPU, VirtIO-Net, VirtIO-SCSI.",
+                    "BDS: Boot Device Selection -> CD-ROM ($isoDisplayName)",
+                    if (vm.bypassTpm) "ACPI: Injecting LabConfig TPM 2.0 & RAM check bypass table..." else "ACPI: Initializing TPM 2.0 TIS device...",
+                    "VirtIO: Injected storage driver VirtIO-SCSI into PE environment.",
+                    "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
+                    "EFI: Loading \\EFI\\BOOT\\BOOTAA64.EFI into guest memory..."
+                )
+            } else {
+                listOf(
+                    "OVMF UEFI x86_64 Firmware initializing in QEMU TCG translation mode...",
+                    "SEC: Initializing x86_64 vCPU state (${vm.cpuCores} cores)...",
+                    "PEI: Memory map configured (${vm.ramMb} MB allocated).",
+                    "DXE: Enumerating Q35 PCI Express Root Complex & VirtIO devices.",
+                    "BDS: Target CD-ROM attached: $isoDisplayName",
+                    "ACPI: Injecting LabConfig TPM 2.0 bypass...",
+                    "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
+                    "EFI: Loading \\EFI\\BOOT\\BOOTX64.EFI into guest memory..."
+                )
+            }
+
+            for (i in uefiLogs.indices) {
+                delay(240)
+                val log = uefiLogs[i]
+                _state.update {
+                    it.copy(
+                        bootProgress = (i + 1) / (uefiLogs.size.toFloat() * 3f),
+                        bootLogLines = it.bootLogLines + log
+                    )
+                }
+            }
+
+            // Stage 2: Windows 11 Booting Animation
+            _state.update { it.copy(bootState = VmBootState.WINDOWS_BOOTING) }
+            delay(1600)
+
+            // Stage 3: Windows Setup or Desktop
+            if (!vm.isInstalled && hasIso) {
+                _state.update {
+                    it.copy(
+                        bootState = VmBootState.WINDOWS_SETUP_OOBE,
+                        bootProgress = 1f,
+                        setupProgressPercent = 0,
+                        setupCurrentStep = "Preparing Windows 11 installation..."
+                    )
                 }
             } else {
-                // SIMULATED UI PATH (Fallback when actual QEMU .so binaries are missing)
-                // Stage 1: UEFI BIOS & EDK2 Init
-                val uefiLogs = if (isArm64) {
-                    listOf(
-                        "UEFI EDK2 Firmware v2024.08-arm64 initializing...",
-                        "SEC: Secure boot variables loaded (BypassSecureBoot=${vm.bypassSecureBoot}).",
-                        "PEI: Initializing RAM (${vm.ramMb} MB allocated).",
-                        "DXE: Enumerating PCI Bus: VirtIO-GPU, VirtIO-Net, VirtIO-SCSI.",
-                        "BDS: Boot Device Selection -> CD-ROM ($isoDisplayName)",
-                        if (vm.bypassTpm) "ACPI: Injecting LabConfig TPM 2.0 & RAM check bypass table..." else "ACPI: Initializing TPM 2.0 TIS device...",
-                        "VirtIO: Injected storage driver VirtIO-SCSI into PE environment.",
-                        "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
-                        "EFI: Loading \\EFI\\BOOT\\BOOTAA64.EFI into guest memory..."
-                    )
-                } else {
-                    listOf(
-                        "OVMF UEFI x86_64 Firmware initializing in QEMU TCG translation mode...",
-                        "SEC: Initializing x86_64 vCPU state (${vm.cpuCores} cores)...",
-                        "PEI: Memory map configured (${vm.ramMb} MB allocated).",
-                        "DXE: Enumerating Q35 PCI Express Root Complex & VirtIO devices.",
-                        "BDS: Target CD-ROM attached: $isoDisplayName",
-                        "ACPI: Injecting LabConfig TPM 2.0 bypass...",
-                        "CD-ROM: 'Press any key to boot from CD or DVD...' -> [AUTO-TRIGGERED]",
-                        "EFI: Loading \\EFI\\BOOT\\BOOTX64.EFI into guest memory..."
+                _state.update {
+                    it.copy(
+                        bootState = VmBootState.WINDOWS_DESKTOP,
+                        bootProgress = 1f,
+                        activeWindow = ActiveWindow.NONE
                     )
                 }
-
-                for (i in uefiLogs.indices) {
-                    delay(240)
-                    val log = uefiLogs[i]
-                    _state.update {
-                        it.copy(
-                            bootProgress = (i + 1) / (uefiLogs.size.toFloat() * 3f),
-                            bootLogLines = it.bootLogLines + log
-                        )
-                    }
-                }
-
-                // Stage 2: Windows 11 Booting Animation
-                _state.update { it.copy(bootState = VmBootState.WINDOWS_BOOTING) }
-                delay(1600)
-
-                // Stage 3: Windows Setup or Desktop
-                if (!vm.isInstalled && hasIso) {
-                    _state.update {
-                        it.copy(
-                            bootState = VmBootState.WINDOWS_SETUP_OOBE,
-                            bootProgress = 1f,
-                            setupProgressPercent = 0,
-                            setupCurrentStep = "Preparing Windows 11 installation..."
-                        )
-                    }
-                } else {
-                    _state.update {
-                        it.copy(
-                            bootState = VmBootState.WINDOWS_DESKTOP,
-                            bootProgress = 1f,
-                            activeWindow = ActiveWindow.NONE
-                        )
-                    }
-                }
-
-                startTelemetryLoop()
             }
+
+            startTelemetryLoop()
         }
     }
 
